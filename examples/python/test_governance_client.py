@@ -6,6 +6,8 @@ Covers:
 - The vote step is attempted when status is "Active".
 - The vote step is skipped when status is anything other than "Active".
 - The script exits non-zero when the vote call raises.
+- The vote argument is encoded as a one-element vector holding the variant
+  symbol (matching the contract's #[contracttype] union encoding).
 - factory_client exits non-zero when create_pool raises.
 - twap_client exits non-zero for unexpected failures, and uses EXIT_NO_SNAPSHOT
   (2) for the expected first-run "no snapshot yet" case.
@@ -128,6 +130,27 @@ def test_vote_failure_returns_nonzero(monkeypatch: pytest.MonkeyPatch) -> None:
     result = governance_client.main()
 
     assert result != 0, "main() must return non-zero when vote raises"
+
+
+def test_vote_argument_is_vec_of_variant_symbol(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The vote choice must be encoded as ScVal vec [symbol(choice)]."""
+    monkeypatch.setenv("PROPOSAL_ID", "1")
+    monkeypatch.setenv("VOTE_CHOICE", "For")
+    _mock_governance_env(monkeypatch, ["Active"])
+
+    submit_mock = Mock(return_value=0)
+    monkeypatch.setattr(governance_client, "submit_contract_call", submit_mock)
+
+    assert governance_client.main() == 0
+
+    vote_calls = [c for c in submit_mock.call_args_list if c.args[2] == "vote"]
+    assert len(vote_calls) == 1
+    # The choice argument is the last positional argument after (client, kp, method)
+    encoded_choice = vote_calls[0].args[-1]
+    assert encoded_choice.type == "vec"
+    assert len(encoded_choice.vec) == 1
+    assert encoded_choice.vec[0].type == "sym"
+    assert encoded_choice.vec[0].sym == "For"
 
 
 # ---------------------------------------------------------------------------

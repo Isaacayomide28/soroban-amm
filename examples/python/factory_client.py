@@ -8,11 +8,53 @@ from stellar_sdk.address import Address
 from stellar_sdk.contract import ContractClient
 
 from common import (
+    ConfigError,
     format_json,
     required_env,
     simulate_contract_call,
     submit_contract_call,
 )
+
+# Fee tiers accepted by Factory::create_pool (contracts/factory/src/lib.rs).
+# Any other value is rejected on-chain with FactoryError::InvalidFeeBps.
+FEE_TIERS: dict[int, int] = {0: 1, 1: 5, 2: 30, 3: 100}  # tier -> fee in bps
+FEE_TIER_TABLE = "\n".join(f"  tier {t} = {bps} bps" for t, bps in FEE_TIERS.items())
+BPS_TO_TIER: dict[int, int] = {bps: t for t, bps in FEE_TIERS.items()}
+
+
+def resolve_fee_tier() -> int:
+    """Read the fee tier from FEE_TIER, or map a legacy FEE_BPS value to a tier."""
+    tier_raw = os.getenv("FEE_TIER")
+    if tier_raw is not None and tier_raw != "":
+        return validate_fee_tier(tier_raw)
+
+    bps_raw = os.getenv("FEE_BPS")
+    if bps_raw is not None and bps_raw != "":
+        try:
+            bps = int(bps_raw)
+        except ValueError as exc:
+            raise ConfigError(f"FEE_BPS must be one of 1, 5, 30, 100; got {bps_raw!r}") from exc
+        if bps not in BPS_TO_TIER:
+            raise ConfigError(
+                f"FEE_BPS={bps} does not map to a factory fee tier. "
+                f"Use FEE_TIER instead. Valid tiers:\n{FEE_TIER_TABLE}"
+            )
+        tier = BPS_TO_TIER[bps]
+        print(f"Note: FEE_BPS={bps} is deprecated; mapped to FEE_TIER={tier}. Prefer FEE_TIER.")
+        return tier
+
+    return validate_fee_tier("2")
+
+
+def validate_fee_tier(raw: str | int) -> int:
+    """Parse and validate a fee tier in 0..=3, raising ConfigError otherwise."""
+    try:
+        tier = int(raw)
+    except (TypeError, ValueError) as exc:
+        raise ConfigError(f"FEE_TIER must be an integer 0-3; got {raw!r}") from exc
+    if tier not in FEE_TIERS:
+        raise ConfigError(f"Invalid fee tier {tier}. Valid tiers:\n{FEE_TIER_TABLE}")
+    return tier
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -31,7 +73,7 @@ def main(argv: list[str] | None = None) -> int:
     source_secret = required_env("SOURCE_SECRET")
     token_a_contract_id = required_env("TOKEN_A_CONTRACT_ID")
     token_b_contract_id = required_env("TOKEN_B_CONTRACT_ID")
-    fee_bps = int(os.getenv("FEE_BPS", "30"))
+    fee_tier = resolve_fee_tier()
 
     source_keypair = Keypair.from_secret(source_secret)
 
@@ -51,10 +93,10 @@ def main(argv: list[str] | None = None) -> int:
 
     # 2. create_pool if it doesn't exist
     if not pool_address:
-        print(f"\n2. Creating pool for pair with fee_bps={fee_bps}...")
+        print(f"\n2. Creating pool for pair with fee_tier={fee_tier} ({FEE_TIERS[fee_tier]} bps)...")
         try:
             pool_address, governance_address = create_pool(
-                client, source_keypair, source_keypair.public_key, token_a_contract_id, token_b_contract_id, fee_bps
+                client, source_keypair, source_keypair.public_key, token_a_contract_id, token_b_contract_id, fee_tier
             )
             print(f"Pool created successfully at: {pool_address}")
             if governance_address:
@@ -83,9 +125,11 @@ def create_pool(
     caller: str,
     token_a: str,
     token_b: str,
-    fee_bps: int,
+    fee_tier: int,
     governance_wasm_hash: bytes | None = None,
 ) -> tuple[str, str | None]:
+    # Validate client-side so an out-of-range tier fails before any network call.
+    validate_fee_tier(fee_tier)
     result = submit_contract_call(
         client,
         source_kp,
@@ -93,7 +137,7 @@ def create_pool(
         scval.to_address(caller),
         scval.to_address(token_a),
         scval.to_address(token_b),
-        scval.to_int128(fee_bps),
+        scval.to_int128(fee_tier),
         scval.to_bytes(governance_wasm_hash) if governance_wasm_hash is not None else scval.to_void(),
     )
 

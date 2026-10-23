@@ -9,11 +9,14 @@ from stellar_sdk.contract import ContractClient
 
 from common import (
     decode_enum_variant,
+    encode_unit_variant,
     format_json,
     required_env,
     simulate_contract_call,
     submit_contract_call,
 )
+
+VOTE_CHOICES = ("For", "Against", "Abstain")
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -104,10 +107,12 @@ def propose(client: ContractClient, proposer_kp: Keypair, new_fee_bps: int) -> i
 
 def vote(client: ContractClient, voter_kp: Keypair, proposal_id: int, choice: str) -> None:
     # choice must be For, Against, or Abstain
-    if choice not in ("For", "Against", "Abstain"):
+    if choice not in VOTE_CHOICES:
         raise ValueError(f"Invalid vote choice '{choice}'. Must be For, Against, or Abstain.")
 
-    choice_scval = scval.to_symbol(choice)
+    # Vote is a #[contracttype] union, so it is encoded as a one-element vector
+    # holding the variant symbol (matching the TypeScript SDK's encodeVote).
+    choice_scval = encode_unit_variant(choice)
     submit_contract_call(
         client,
         voter_kp,

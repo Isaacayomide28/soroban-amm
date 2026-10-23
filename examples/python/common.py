@@ -65,6 +65,15 @@ def encode_string(value: str) -> Any:
     return scval.to_string(value)
 
 
+def encode_unit_variant(name: str) -> Any:
+    """Encode a unit enum variant (e.g. ``Vote::For``) as a Soroban ScVal.
+
+    Soroban encodes a ``#[contracttype]`` union variant as a vector whose first
+    element is the variant symbol, so a bare symbol is rejected by the host.
+    """
+    return scval.to_vec([scval.to_symbol(name)])
+
+
 def decode_scval(value: Any) -> Any:
     """Decode an ScVal through the SDK's native conversion helper."""
     return scval.to_native(value)
