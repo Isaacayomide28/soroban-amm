@@ -17,6 +17,7 @@ from __future__ import annotations
 from unittest.mock import MagicMock, Mock, patch
 
 import pytest
+from stellar_sdk.xdr import SCValType
 
 import factory_client
 import governance_client
@@ -147,10 +148,13 @@ def test_vote_argument_is_vec_of_variant_symbol(monkeypatch: pytest.MonkeyPatch)
     assert len(vote_calls) == 1
     # The choice argument is the last positional argument after (client, kp, method)
     encoded_choice = vote_calls[0].args[-1]
-    assert encoded_choice.type == "vec"
-    assert len(encoded_choice.vec) == 1
-    assert encoded_choice.vec[0].type == "sym"
-    assert encoded_choice.vec[0].sym == "For"
+    assert encoded_choice.type == SCValType.SCV_VEC
+    assert encoded_choice.vec is not None
+    assert len(encoded_choice.vec.sc_vec) == 1
+    variant = encoded_choice.vec.sc_vec[0]
+    assert variant.type == SCValType.SCV_SYMBOL
+    assert variant.sym is not None
+    assert variant.sym.sc_symbol == b"For"
 
 
 # ---------------------------------------------------------------------------
