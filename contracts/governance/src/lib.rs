@@ -2064,6 +2064,10 @@ impl Governance {
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
+// Authorization regression tests for the admin entrypoints.
+#[cfg(test)]
+mod auth_tests;
+
 #[cfg(test)]
 mod tests {
     extern crate std;
